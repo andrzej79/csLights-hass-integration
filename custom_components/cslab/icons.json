@@ -1,0 +1,12 @@
+{
+  "entity": {
+    "sensor": {
+      "cswallswitch": {
+        "default": "mdi:light-switch",
+        "state": {
+          "0": "mdi:light-switch-off"
+        }
+      }
+    }
+  }
+}

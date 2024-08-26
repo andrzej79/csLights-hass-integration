@@ -1,0 +1,15 @@
+{
+  "domain": "cslab",
+  "name": "csLights",
+  "codeowners": ["@andrzej79"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://www.home-assistant.io/integrations/cslab",
+  "homekit": {},
+  "iot_class": "local_push",
+  "loggers": ["cslights"],
+  "requirements": [],
+  "ssdp": [],
+  "zeroconf": [],
+  "version": "1.0.3"
+}
