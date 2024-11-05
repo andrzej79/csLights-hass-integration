@@ -110,23 +110,42 @@ class CSHomeMaster:
             await self.initConnection()
             while True:
                 await asyncio.sleep(0)
+                if self._master_online is False:
+                    await self.handleConnectionError()
+                    continue
                 if self._tcpReader is None:
                     raise RuntimeError("TCP reader is None")
-                rplData = await self._tcpReader.readline()
+                try:
+                    rplData = await asyncio.wait_for(
+                        self._tcpReader.readline(), timeout=60
+                    )
+                except TimeoutError:
+                    _log.error("TCP read timeout")
+                    await self.handleConnectionError()
+                    continue
+                _log.debug("csLights Received data size: %d", len(rplData))
                 if len(rplData) == 0:
-                    self._master_online = False
-                    await self.devs_publish_update()
-                    _log.error("Connection error, reconnecting...")
-                    await asyncio.sleep(5)
-                    if await self.initConnection() is True:
-                        await self.update_all_accessories()
-                        _log.debug("Connection restored")
+                    await self.handleConnectionError()
                     continue
                 await self.parseIncomingData(rplData)
 
         except asyncio.CancelledError:
             _log.debug("receiver async_task cancelled")
             return
+
+    async def handleConnectionError(self) -> None:
+        """Handle connection error."""
+        self._master_online = False
+        if self._tcpWriter is not None:
+            self._tcpWriter.close()
+        if self._tcpReader is not None:
+            self._tcpReader.feed_eof()
+        await self.devs_publish_update()
+        _log.error("Connection error, reconnecting...")
+        await asyncio.sleep(5)
+        if await self.initConnection() is True:
+            await self.update_all_accessories()
+            _log.info("Connection restored")
 
     async def initConnection(self) -> bool:
         """Initialize connection."""
@@ -316,7 +335,6 @@ class CSHomeMaster:
 
     async def setAccBrightnessValue(self, accId: int, value: float) -> bool:
         """Set Accessory Brightness value."""
-        # reader, writer = await asyncio.open_connection(self.host, self.port)
         data = {
             "command": "AccSetValue",
             "acc-id": str(accId),
@@ -328,7 +346,6 @@ class CSHomeMaster:
             _log.error("TCP writer is None")
             return False
         self._tcpWriter.write(data_str.encode())
-        # await writer.drain()
         return True
 
     async def setAccBoolValue(self, accId: int, value: bool) -> bool:
