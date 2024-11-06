@@ -162,3 +162,13 @@ cython_debug/
 #.idea/
 
 .DS_Store
+/.storage
+/blueprints
+scenes.yaml
+scripts.yaml
+secrets.yaml
+home-assistant_v2.db
+home-assistant.log.1
+configuration.yaml
+automations.yaml
+.HA_VERSION

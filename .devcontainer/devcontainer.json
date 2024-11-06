@@ -1,25 +1,33 @@
 {
   "name": "Home Assistant Development",
   "build": {
-    "dockerfile": "Dockerfile",
-    "context": ".."
+      "dockerfile": "Dockerfile",
+      "context": ".."
   },
   "customizations": {
     "vscode": {
       "settings": {
-        "terminal.integrated.shell.linux": "/bin/bash"
-      },
+        "terminal.integrated.shell.linux": "/bin/bash",
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "editor.formatOnSave": true,
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.linting.mypyEnabled": true,
+        "python.linting.banditEnabled": true
+    },
       "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "eamodio.gitlens"
+          "ms-python.python",
+          "ms-python.vscode-pylance",
+          "ms-azuretools.vscode-docker",
+          "github.vscode-pull-request-github",
+          "eamodio.gitlens"
       ]
     }
   },
-  "postCreateCommand": "pip install -r requirements_dev.txt",
   "forwardPorts": [8123],
-  "mounts": [
-    "source=${localWorkspaceFolder}/custom_components,target=/config/custom_components,type=bind"
-  ],
-  "remoteUser": "root"
+  "postCreateCommand": "pip install -r requirements_dev.txt",
+  // "mounts": [
+  //   "source=${localWorkspaceFolder}/custom_components,target=/config/custom_components,type=bind"
+  // ],
+  "remoteUser": "vscode"
 }
