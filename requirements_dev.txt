@@ -1,3 +1,5 @@
+# Home Assistant Core
+colorlog
 pytest
 flake8
 mypy

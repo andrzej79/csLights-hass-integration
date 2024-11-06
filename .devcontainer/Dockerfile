@@ -1,49 +1,62 @@
-# Use the official Home Assistant image as the base
-FROM homeassistant/home-assistant:latest
+# Use the official Python development container image
+FROM mcr.microsoft.com/vscode/devcontainers/python:3.12
 
-# Install development tools and utilities
-RUN apk update && apk add --no-cache \
-    build-base \
-    python3 \
-    python3-dev \
-    libffi-dev \
-    openssl-dev \
-    cargo \
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Uninstall pre-installed formatting and linting tools
+# They would conflict with our pinned versions
+RUN \
+    pipx uninstall pydocstyle \
+    && pipx uninstall pycodestyle \
+    && pipx uninstall mypy \
+    && pipx uninstall pylint
+
+RUN \
+    curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    # Additional library needed by some tests and accordingly by VScode Tests Discovery
+    bluez \
+    ffmpeg \
+    libudev-dev \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libgammu-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
+    libpcap-dev \
+    libturbojpeg0 \
+    libyaml-dev \
+    libxml2 \
     git \
-    bash \
-    curl \
-    neofetch \
-    sudo \
-    shadow \
-    iptables \
-    nano \
-    && pip install --upgrade pip setuptools wheel debugpy
+    cmake \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user (optional but recommended)
-RUN adduser -D -h /home/vscode -s /bin/bash vscode
-RUN adduser vscode wheel
+# Install uv
+RUN pip3 install uv
 
-# Configure sudoers to allow passwordless sudo for wheel group
-RUN echo "%wheel ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+WORKDIR /usr/src
 
-# Customize bash for the vscode user: PS1 and alias
-RUN echo 'export PS1="\[\e[32m\]\u@\h\[\e[m\]:\[\e[34m\]\w\[\e[m\]\$ "' >> /home/vscode/.bashrc && \
-    echo 'alias ll="ls -l --group-directories-first"' >> /home/vscode/.bashrc 
+# Setup hass-release
+RUN git clone --depth 1 https://github.com/home-assistant/hass-release \
+    && uv pip install --system -e hass-release/
 
-# Set the working directory
-WORKDIR /workspaces/cslights-integration
-
-# Copy requirements and install Python dependencies
-COPY requirements_dev.txt /tmp/pip-tmp/
-
-# install requirements
-RUN pip install -r /tmp/pip-tmp/requirements_dev.txt
-
-# Ensure /usr/local/bin and /home/vscode/.local/bin are in PATH
-ENV PATH="/usr/local/bin:/home/vscode/.local/bin:${PATH}"
-
-# Expose ports
-EXPOSE 8123 5678
-
-# Switch to the non-root user
 USER vscode
+ENV VIRTUAL_ENV="/home/vscode/.local/ha-venv"
+RUN uv venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+WORKDIR /tmp
+
+# Install Python dependencies from requirements
+COPY requirements_dev.txt ./
+RUN uv pip install -r requirements_dev.txt
+
+WORKDIR /workspaces
+
+# Set the default shell to bash instead of sh
+ENV SHELL /bin/bash

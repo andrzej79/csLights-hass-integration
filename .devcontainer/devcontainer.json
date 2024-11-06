@@ -6,28 +6,30 @@
   },
   "customizations": {
     "vscode": {
-      "settings": {
-        "terminal.integrated.shell.linux": "/bin/bash",
-        "python.defaultInterpreterPath": "/usr/local/bin/python",
-        "editor.formatOnSave": true,
-        "python.linting.enabled": true,
-        "python.linting.pylintEnabled": true,
-        "python.linting.mypyEnabled": true,
-        "python.linting.banditEnabled": true
-    },
       "extensions": [
-          "ms-python.python",
-          "ms-python.vscode-pylance",
-          "ms-azuretools.vscode-docker",
-          "github.vscode-pull-request-github",
-          "eamodio.gitlens"
-      ]
+        "charliermarsh.ruff",
+        "ms-python.pylint",
+        "ms-python.vscode-pylance",
+        "visualstudioexptteam.vscodeintellicode",
+        "redhat.vscode-yaml",
+        "esbenp.prettier-vscode",
+        "GitHub.vscode-pull-request-github",
+        "GitHub.copilot"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
+        "python.experiments.optOutFrom": ["pythonTestAdapter"],
+        "python.linting.banditEnabled": true,
+        "python.linting.enabled": true,
+        "python.linting.mypyEnabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.pythonPath": "/home/vscode/.local/ha-venv/bin/python",
+        "python.terminal.activateEnvInCurrentTerminal": true,
+        "terminal.integrated.shell.linux": "/bin/bash"
     }
   },
-  "forwardPorts": [8123],
-  "postCreateCommand": "pip install -r requirements_dev.txt",
-  // "mounts": [
-  //   "source=${localWorkspaceFolder}/custom_components,target=/config/custom_components,type=bind"
-  // ],
-  "remoteUser": "vscode"
+  "appPort": ["8123:8123", "5683:5683/udp", "51827:51827"]
+  }
 }
+
