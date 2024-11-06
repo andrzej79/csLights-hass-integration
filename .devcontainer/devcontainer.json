@@ -10,7 +10,7 @@
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "postCreateCommand": "if [ ! -f /workspaces/csLights-hass-integration/configuration.yaml ]; then cp /workspaces/csLights-hass-integration/configuration-defaults.yaml /workspaces/csLights-hass-integration/configuration.yaml; fi",
+  "postCreateCommand": "/workspaces/csLights-hass-integration/postcreate_init.sh",
   "appPort": ["8123:8123", "5683:5683/udp", "51827:51827"],
   "runArgs": ["-e", "GIT_EDITOR=code --wait", "--cap-add=NET_ADMIN"],
   "customizations": {
