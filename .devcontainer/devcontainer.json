@@ -4,6 +4,14 @@
       "dockerfile": "Dockerfile",
       "context": ".."
   },
+  "containerEnv": {
+    "PYTHONASYNCIODEBUG": "1"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "appPort": ["8123:8123", "5683:5683/udp", "51827:51827"],
+  "runArgs": ["-e", "GIT_EDITOR=code --wait", "--cap-add=NET_ADMIN"],
   "customizations": {
     "vscode": {
       "extensions": [
@@ -27,9 +35,8 @@
         "python.pythonPath": "/home/vscode/.local/ha-venv/bin/python",
         "python.terminal.activateEnvInCurrentTerminal": true,
         "terminal.integrated.shell.linux": "/bin/bash"
+      }
     }
-  },
-  "appPort": ["8123:8123", "5683:5683/udp", "51827:51827"]
   }
 }
 

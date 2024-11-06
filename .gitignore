@@ -172,3 +172,6 @@ home-assistant.log.1
 configuration.yaml
 automations.yaml
 .HA_VERSION
+*.db-shm
+*.db-wal
+
