@@ -175,3 +175,4 @@ automations.yaml
 *.db-shm
 *.db-wal
 
+home-assistant.log.fault
