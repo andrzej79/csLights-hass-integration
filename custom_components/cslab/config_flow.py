@@ -12,6 +12,7 @@ from homeassistant.config_entries import (
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
+    OptionsFlowWithConfigEntry
 )
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
@@ -76,12 +77,12 @@ class CSConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 # Options Flow Handler
-class CSOptionsFlowHandler(OptionsFlow):
+class CSOptionsFlowHandler(OptionsFlowWithConfigEntry):
     """Handle csLights options."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
+    # def __init__(self, config_entry: ConfigEntry) -> None:
+    #     """Initialize options flow."""
+    #     super().__init__(config_entry)
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
