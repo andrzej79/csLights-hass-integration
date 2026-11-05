@@ -40,7 +40,7 @@ python3.14 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
 .venv/bin/pytest                                   # all tests
 .venv/bin/pytest tests/test_cslab.py::test_config_flow   # one test
 ```
-- CI only runs hassfest and HACS validation (`.github/workflows/`), so `manifest.json`, `hacs.json` and the translation files must pass those validators.
+- CI (`.github/workflows/`) runs the tests, hassfest and HACS validation on every push, so `manifest.json`, `hacs.json` and the translation files must pass those validators. GitHub disables scheduled workflows after 60 days without repository activity; re-enable them with `gh workflow enable`.
 - The repo root doubles as the Home Assistant config directory. `configuration.yaml`, `.storage/`, `home-assistant_v2.db`, logs and similar are git-ignored runtime state. `postcreate_init.sh` creates `configuration.yaml` from `configuration-defaults.yaml`, so make default config changes in the latter.
 - Debug logging is controlled by the `custom_components.cslab` logger in `configuration.yaml`.
 

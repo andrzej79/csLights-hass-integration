@@ -29,6 +29,7 @@ MODEL = [
     accessory(2, 3, 4, [module(12, 3, 1)], "Blind"),             # window blind
     accessory(3, 2, 1, [module(12, 3, 1)], "Relay"),             # relay
     accessory(4, 4, 1, [module(13, 3, 2), module(14, 3, 3)], "Wall"),  # wall switch
+    accessory(5, 1, 1, [module(12, 3, 1)], "Spot"),              # on/off light (no brightness)
 ]
 MODULES = [dict(module(20, 1), lbusCount=4), module(11, 2)]
 
@@ -37,6 +38,7 @@ STATES = {
     2: {"type": "blind", "currPos": 0.29, "cmdPos": 0.29, "state": "BlindIdle"},
     3: {"type": "relay", "state": True},
     4: {"type": "switch", "value": "1"},
+    5: {"type": "light", "on": False, "brightness": 0.0},
 }
 
 
@@ -48,6 +50,7 @@ class FakeDaemon:
         self.writers = []
         self.server = None
         self.port = None
+        self.silent: set[str] = set()   # commands left unanswered
 
     async def start(self, port=0):
         self.server = await asyncio.start_server(self.handle, "127.0.0.1", port)
@@ -74,8 +77,14 @@ class FakeDaemon:
         except (ConnectionError, OSError):
             pass
 
+    def send(self, rpl: dict):
+        """Push a message to the connected client, like the daemon's broadcasts."""
+        self.writers[-1].write(json.dumps(rpl).encode() + b"\n")
+
     async def reply(self, writer, cmd):
         c = cmd["command"]
+        if c in self.silent:
+            return
         if c == "GetHomeModel":
             rpl = {"rpl-type": "home-model", "accessories": self.accessories}
         elif c == "GetModules":
