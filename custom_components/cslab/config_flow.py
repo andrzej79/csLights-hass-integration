@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -18,7 +20,7 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import DOMAIN
+from .const import CSMASTER_TCP_PORT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,10 +36,25 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
-    if data[CONF_HOST] is None or data[CONF_HOST] == "":
+    host = (data.get(CONF_HOST) or "").strip()
+    if host == "":
         raise InvalidHost
+    await validate_connection(host)
+    return {"title": "csLights Master Controller", "host": host}
 
-    return {"title": "csLights Master Controller"}
+
+async def validate_connection(host: str) -> None:
+    """Check that the master accepts a TCP connection, raise CannotConnect if not."""
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, CSMASTER_TCP_PORT), timeout=5
+        )
+    except (OSError, TimeoutError) as err:
+        _LOGGER.debug("Connection test to %s failed: %s", host, err)
+        raise CannotConnect from err
+    writer.close()
+    with contextlib.suppress(OSError):
+        await writer.wait_closed()
 
 
 class CSConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -61,7 +78,9 @@ class CSConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                return self.async_create_entry(title=info["title"], data=user_input)
+                return self.async_create_entry(
+                    title=info["title"], data={CONF_HOST: info["host"]}
+                )
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
@@ -88,8 +107,19 @@ class CSOptionsFlowHandler(OptionsFlowWithConfigEntry):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            host = (user_input.get("master_host") or "").strip()
+            try:
+                if host == "":
+                    raise InvalidHost
+                await validate_connection(host)
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except InvalidHost:
+                errors["base"] = "invalid_host"
+            else:
+                return self.async_create_entry(title="", data={"master_host": host})
 
         return self.async_show_form(
             step_id="init",
@@ -101,6 +131,7 @@ class CSOptionsFlowHandler(OptionsFlowWithConfigEntry):
                     ): str,
                 }
             ),
+            errors=errors,
         )
 
 

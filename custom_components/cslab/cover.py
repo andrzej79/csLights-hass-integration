@@ -30,7 +30,7 @@ def hass_to_cs_position(hass_pos: int) -> float | None:
 
 def cs_to_hass_position(cs_pos: float) -> int | None:
     """Convert csLights position to Home Assistant position."""
-    return int(cs_pos * 100.0)
+    return round(cs_pos * 100.0)
 
 
 async def async_setup_entry(

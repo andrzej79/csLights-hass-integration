@@ -146,12 +146,15 @@ class CSHomeItem:
         return None
 
     def all_modules(self) -> list[CSModule]:
-        """Return all modules without duplicates."""
-        unique_modules = set()  # Use a set to track unique modules
-        for svc in self.services:
-            for module in svc.modules:
-                unique_modules.add(module)  # Add each module to the set
-        return list(unique_modules)  # Convert the set back to a list
+        """Return all modules without duplicates, in the order sent by the master.
+
+        The order must be stable across restarts, because the first module
+        decides which HA device the accessory's entities belong to.
+        """
+        unique_modules = dict.fromkeys(
+            module for svc in self.services for module in svc.modules
+        )
+        return list(unique_modules)
 
     def get_brightness_svc(self) -> CSHomeSvcItem | None:
         """Return brightness service."""

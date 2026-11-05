@@ -22,6 +22,20 @@ from .cshome_helpers import (
 
 _log = logging.getLogger(__name__)
 
+# Replies the master broadcasts to all clients that this integration does not use.
+IGNORED_RPL_TYPES = {
+    "ctrl-devs-discover",
+    "lbus-devs-discover",
+    "io-states",
+    "system-status",
+    "grp-brightness",
+}
+
+
+def _home_model_signature(accessories: list) -> list[str]:
+    """Return an order-independent signature of the home model accessories."""
+    return sorted(json.dumps(acc, sort_keys=True) for acc in accessories)
+
 
 class CSHomeMaster:
     """CS-Lab's home master class."""
@@ -43,6 +57,9 @@ class CSHomeMaster:
         self._homeModelReady = asyncio.Event()
         self._moduleListReady = asyncio.Event()
         self._master_online = False
+        # signature of the home model loaded at setup, compared after reconnect
+        self._home_model_sig: list[str] | None = None
+        self._model_check_pending = False
         self._tcpReader: asyncio.StreamReader | None = None
         self._tcpWriter: asyncio.StreamWriter | None = None
         _log.debug("CSHomeMaster initialized host: %s port: %d", self.host, self.port)
@@ -56,6 +73,7 @@ class CSHomeMaster:
         """Cleanup."""
         if self._task is not None:
             self._task.cancel()
+        self._master_online = False
         if self._tcpWriter is not None:
             self._tcpWriter.close()
         if self._tcpReader is not None:
@@ -83,16 +101,17 @@ class CSHomeMaster:
         except TimeoutError:
             _log.error("TCP connection with host: %s failed!", self.host)
             return False
-        # wait for home model to be received
+        # request home model and module list, both methods wait for the reply
+        # (5 s each) and return False on timeout
         try:
-            await asyncio.wait_for(self.readHomeModel(), timeout=5)
-        except TimeoutError:
-            _log.error("Home model receive timeout!")
-            return False
-        try:
-            await asyncio.wait_for(self.getModuleList(), timeout=5)
-        except TimeoutError:
-            _log.error("Module list receive timeout!")
+            if not await asyncio.wait_for(self.readHomeModel(), timeout=10):
+                _log.error("Home model receive timeout!")
+                return False
+            if not await asyncio.wait_for(self.getModuleList(), timeout=10):
+                _log.error("Module list receive timeout!")
+                return False
+        except (TimeoutError, OSError) as e:
+            _log.error("CSHomeMaster setup failed: %s", e)
             return False
         # connection ready, home model received
         _log.debug("CSHomeMaster setup completed")
@@ -110,28 +129,38 @@ class CSHomeMaster:
             await self.initConnection()
             while True:
                 await asyncio.sleep(0)
-                if self._master_online is False:
-                    await self.handleConnectionError()
-                    continue
-                if self._tcpReader is None:
-                    raise RuntimeError("TCP reader is None")
                 try:
-                    rplData = await asyncio.wait_for(
-                        self._tcpReader.readline(), timeout=60
-                    )
-                except TimeoutError:
-                    _log.error("TCP read timeout")
+                    await self._receive_once()
+                except Exception:
+                    # keep the receiver alive whatever goes wrong
+                    _log.exception("Unexpected error in csLights receiver")
                     await self.handleConnectionError()
-                    continue
-                _log.debug("csLights Received data size: %d", len(rplData))
-                if len(rplData) == 0:
-                    await self.handleConnectionError()
-                    continue
-                await self.parseIncomingData(rplData)
 
         except asyncio.CancelledError:
             _log.debug("receiver async_task cancelled")
             return
+
+    async def _receive_once(self) -> None:
+        """Receive and handle one line, or handle a broken connection."""
+        if self._master_online is False or self._tcpReader is None:
+            await self.handleConnectionError()
+            return
+        try:
+            rplData = await asyncio.wait_for(self._tcpReader.readline(), timeout=60)
+        except TimeoutError:
+            _log.error("TCP read timeout")
+            await self.handleConnectionError()
+            return
+        except (OSError, ValueError) as e:
+            # connection reset/aborted, or line longer than the reader limit
+            _log.error("TCP read error: %s", e)
+            await self.handleConnectionError()
+            return
+        _log.debug("csLights Received data size: %d", len(rplData))
+        if len(rplData) == 0:
+            await self.handleConnectionError()
+            return
+        await self.parseIncomingData(rplData)
 
     async def handleConnectionError(self) -> None:
         """Handle connection error."""
@@ -144,8 +173,21 @@ class CSHomeMaster:
         _log.error("Connection error, reconnecting...")
         await asyncio.sleep(5)
         if await self.initConnection() is True:
-            await self.update_all_accessories()
-            _log.info("Connection restored")
+            _log.info("Connection restored, checking home model")
+            # The master may have restarted with a changed home database. Verify
+            # the home model before requesting states: requesting a removed
+            # accessory id used to crash the master. Accessory states are
+            # requested once the model is confirmed (handleIncomingHomeModel).
+            await self.requestHomeModelCheck()
+
+    async def requestHomeModelCheck(self) -> bool:
+        """Request the home model to compare it with the one loaded at setup."""
+        if self._tcpWriter is None:
+            _log.error("TCP writer is None")
+            return False
+        self._model_check_pending = True
+        self._tcpWriter.write(json.dumps({"command": "GetHomeModel"}).encode())
+        return True
 
     async def initConnection(self) -> bool:
         """Initialize connection."""
@@ -169,26 +211,31 @@ class CSHomeMaster:
         """Parse data."""
         try:
             jrpl = json.loads(data)
-        except json.JSONDecodeError as e:
-            _log.error(
-                "Failed to parse json (exc: %s line: %d pos: %d)",
-                e.msg,
-                e.lineno,
-                e.pos,
-            )
+        except ValueError as e:  # JSONDecodeError or UnicodeDecodeError
+            _log.error("Failed to parse json: %s", e)
             return
-        if jrpl.get("rpl-type") == "acc-state":
-            await self.handleIncomingAccState(jrpl)
-        elif jrpl.get("rpl-type") == "home-model":
-            await self.handleIncomingHomeModel(jrpl)
-        elif jrpl.get("rpl-type") == "wled-diag":
-            await self.handleIncomingWLedDiag(jrpl)
-        elif jrpl.get("rpl-type") == "module-list":
-            await self.handleIncomingModuleList(jrpl)
-        elif jrpl.get("rpl-type") == "lbus-status":
-            await self.handleIncomingLBusStatus(jrpl)
-        else:
-            _log.error("Unknown json data: %s", jrpl)
+        if not isinstance(jrpl, dict):
+            _log.error("Unexpected json data (not an object): %.200s", data)
+            return
+        rpl_type = jrpl.get("rpl-type")
+        handlers = {
+            "acc-state": self.handleIncomingAccState,
+            "home-model": self.handleIncomingHomeModel,
+            "wled-diag": self.handleIncomingWLedDiag,
+            "module-list": self.handleIncomingModuleList,
+            "lbus-status": self.handleIncomingLBusStatus,
+        }
+        handler = handlers.get(rpl_type)
+        if handler is None:
+            if rpl_type in IGNORED_RPL_TYPES:
+                _log.debug("Ignoring '%s' reply", rpl_type)
+            else:
+                _log.warning("Unknown reply type: %s", rpl_type)
+            return
+        try:
+            await handler(jrpl)
+        except Exception:
+            _log.exception("Failed to handle '%s' reply", rpl_type)
 
     async def handleIncomingAccState(self, jrpl: dict) -> None:
         """Handle incoming accessory state."""
@@ -244,31 +291,59 @@ class CSHomeMaster:
 
     async def handleIncomingHomeModel(self, jrpl: dict) -> None:
         """Handle incoming home model."""
-        # data received, json loaded
-        self._home_items.clear()
         accessories = jrpl.get("accessories")
-        if accessories is None:
-            _log.error("Invalid json (no accessories) home model data: %s", jrpl)
+        if not isinstance(accessories, list):
+            _log.error("Invalid json (no accessories) home model data: %.200s", jrpl)
             return
+        signature = _home_model_signature(accessories)
+
+        if self._homeModelReady.is_set():
+            # Model already loaded at setup: this is the check after reconnect.
+            # Entities are created once, so a changed model needs a reload.
+            check_pending = self._model_check_pending
+            self._model_check_pending = False
+            if signature != self._home_model_sig:
+                _log.warning("Home model changed on the master, reloading integration")
+                self.hass.config_entries.async_schedule_reload(
+                    self.config_entry.entry_id
+                )
+                return
+            if check_pending:
+                await self.update_all_accessories()
+            return
+
+        home_items: list[CSHomeItem] = []
+        lights: list[CSLightDev] = []
+        blinds: list[CSBlindDev] = []
+        relays: list[CSRelayDev] = []
+        switches: list[CSWallSwitchDev] = []
         for acc in accessories:
             await asyncio.sleep(0)
-            home_item = CSHomeItemFromJson(acc)
-            self._home_items.append(home_item)
+            try:
+                home_item = CSHomeItemFromJson(acc)
+            except (AttributeError, KeyError, TypeError, ValueError) as e:
+                # e.g. accessory/service/module type unknown to this version
+                _log.warning("Skipping unsupported accessory (%s): %.200s", e, acc)
+                continue
+            home_items.append(home_item)
             if home_item.accessory.type == AccType.LIGHT:
-                lightDev = CSLightDev(self, home_item)
-                self._lights.append(lightDev)
+                lights.append(CSLightDev(self, home_item))
             elif home_item.accessory.type == AccType.WINDOWBLIND:
-                blindDev = CSBlindDev(self, home_item)
-                self._blinds.append(blindDev)
+                blinds.append(CSBlindDev(self, home_item))
             elif home_item.accessory.type == AccType.RELAY:
-                relayDev = CSRelayDev(self, home_item)
-                self._relays.append(relayDev)
+                relays.append(CSRelayDev(self, home_item))
             elif home_item.accessory.type in (AccType.SWITCH, AccType.XORSWITCH):
-                switchDev = CSWallSwitchDev(self, home_item)
-                self._switches.append(switchDev)
+                switches.append(CSWallSwitchDev(self, home_item))
             else:
                 _log.warning("Unknown accessory type: %s", home_item.accessory.type)
-            self._homeModelReady.set()
+        self._home_items = home_items
+        self._lights = lights
+        self._blinds = blinds
+        self._relays = relays
+        self._switches = switches
+        self._home_model_sig = signature
+        # set after the whole model is parsed, also when it has no accessories
+        self._homeModelReady.set()
 
     async def handleIncomingWLedDiag(self, jrpl: dict) -> None:
         """Handle incoming WLED diagnostics."""
@@ -290,18 +365,28 @@ class CSHomeMaster:
     async def handleIncomingModuleList(self, jrpl: dict) -> None:
         """Handle incoming module list."""
         _log.debug("Received module list")
-        modules = jrpl.get("modules")
-        if modules is None:
-            _log.error("Invalid json (no modules) in module list reply: %s", jrpl)
+        if self._moduleListReady.is_set():
+            # only requested at setup; entities are bound to the first list
+            _log.debug("Module list already loaded, ignoring")
             return
+        modules = jrpl.get("modules")
+        if not isinstance(modules, list):
+            _log.error("Invalid json (no modules) in module list reply: %.200s", jrpl)
+            return
+        hw_modules: list[CSModule] = []
+        ctrl_mod_devs: list[CSLightsCtrlModDev] = []
         for mod in modules:
-            module = CSModuleFromJson(mod)
-            self._hwModules.append(module)
-            if "lbusCount" not in mod:
+            try:
+                module = CSModuleFromJson(mod)
+            except (AttributeError, KeyError, TypeError, ValueError) as e:
+                _log.warning("Skipping unsupported module (%s): %.200s", e, mod)
                 continue
-            lbusCount = mod["lbusCount"]
+            hw_modules.append(module)
+            lbusCount = mod.get("lbusCount", 0)
             if lbusCount > 0:
-                self._ctrlModDevs.append(CSLightsCtrlModDev(self, module, lbusCount))
+                ctrl_mod_devs.append(CSLightsCtrlModDev(self, module, lbusCount))
+        self._hwModules = hw_modules
+        self._ctrlModDevs = ctrl_mod_devs
         self._moduleListReady.set()
 
     async def handleIncomingLBusStatus(self, jrpl: dict) -> None:
@@ -328,9 +413,9 @@ class CSHomeMaster:
             module = ctrlModDev.get_module()
             if module.sn == sn:
                 await ctrlModDev.set_lb_current(lbusIdx, current)
-                # Trigger update if this is the last light bus index
-                if lbusIdx == (ctrlModDev.get_lb_count() - 1):
-                    await ctrlModDev.trigger_publish_updates()
+                # publish on every update: the master sends one message per
+                # light bus it actually has, which may be fewer than lbusCount
+                await ctrlModDev.trigger_publish_updates()
                 return
 
     async def setAccBrightnessValue(self, accId: int, value: float) -> bool:
@@ -443,6 +528,8 @@ class CSHomeMaster:
         await asyncio.sleep(0.2)
         for switch in self._switches:
             await switch.publish_updates()
+        for ctrl_mod_dev in self._ctrlModDevs:
+            await ctrl_mod_dev.publish_updates()
 
     def get_home_items(self):
         """Return home items."""

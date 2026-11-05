@@ -65,11 +65,12 @@ Entities use `should_poll = False` and are push-driven. A command only writes to
 
 ### Startup and reconnect
 
-- `async_setup` starts the receive task, then waits for the connection, home model and module list, with a 5 second timeout for each.
-- The platforms create their entities once, from the device lists filled during that step. If setup fails, `async_setup_entry` still returns `True` and the entities are created from empty lists, so they stay missing until the entry is reloaded.
-- `handleConnectionError` retries every 5 seconds and then re-requests accessory states, but not the home model.
-- `handleIncomingHomeModel` and `handleIncomingModuleList` append to the device lists without clearing them, so requesting either one again would create duplicates.
-- Changing the host in the options flow copies it to `entry.data` without reloading. `CSHomeMaster.host` reads it live, so it only takes effect at the next reconnect.
+- `async_setup` starts the receive task, then waits for the connection, home model and module list, with a 5 second timeout for each. If any step fails, `async_setup_entry` cleans up and raises `ConfigEntryNotReady`, so Home Assistant retries.
+- The platforms create their entities once, from the device lists filled during setup. Any change to the home model therefore needs a reload of the config entry.
+- The receive loop must never die: read errors and timeouts go to `handleConnectionError`, and exceptions from message handlers are logged and skipped.
+- `handleConnectionError` retries every 5 seconds. After reconnecting it requests the home model before any accessory states. If the model differs from the one loaded at setup (compared with `_home_model_signature`), it schedules a reload instead of requesting states. Sending `GetAccState` for an accessory the master no longer has crashed older daemons.
+- Home model and module list replies are only applied once, at setup. Later home models are only compared with the loaded one.
+- Changing the host in the options flow tests the connection, updates `entry.data` and reloads the entry.
 
 ### Data model and entity mapping (`cshome_helpers.py`)
 
