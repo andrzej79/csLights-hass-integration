@@ -91,3 +91,7 @@ The home model is a list of accessories, each with services, each bound to hardw
 ### Translations
 
 UI strings exist in both `strings.json` (which references HA `common::` keys) and `translations/en.json` (which has the resolved English text); update both.
+
+### Brand images
+
+Icons and logos are in `custom_components/cslab/brand/`, which Home Assistant 2026.3+ prefers over the `home-assistant/brands` repo. Make logo changes there, not in the brands repo. Its `custom_integrations/cslab` copy is legacy and only used by Home Assistant versions before 2026.3. If the integration ever moves into Home Assistant core, remove this folder and add the images to the brands repo instead.
