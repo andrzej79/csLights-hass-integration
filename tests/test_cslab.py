@@ -227,7 +227,10 @@ async def test_entity_services_and_states(hass, daemon):
     entry = await setup_entry(hass)
     ids = entity_ids(hass, entry)
     blind, relay, spot, lamp = ids["WindowBlind.002"], ids["Relay.003"], ids["Light.005"], ids["Light.001"]
-    assert await wait_until(hass, lambda: hass.states.get(relay).state == "on")
+    # Home Assistant skips service calls to unavailable entities, so wait until
+    # the master has sent a state for every entity used below
+    for entity_id in (blind, relay, spot, lamp):
+        assert await wait_until(hass, lambda e=entity_id: hass.states.get(e).state != "unavailable")
 
     # on/off light has no brightness
     assert hass.states.get(spot).attributes["supported_color_modes"] == ["onoff"]
