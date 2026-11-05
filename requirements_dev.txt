@@ -1,6 +1,6 @@
-# Home Assistant Core
+# Development environment (devcontainer).
+# Home Assistant comes in through the test harness, pinned to the version it tests against.
+-r requirements_test.txt
 colorlog
-pytest
-flake8
 mypy
-homeassistant
+ruff

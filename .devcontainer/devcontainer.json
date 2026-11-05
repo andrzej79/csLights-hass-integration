@@ -1,25 +1,31 @@
 {
-  "name": "Home Assistant Development",
+  "name": "csLights Home Assistant integration",
   "build": {
-      "dockerfile": "Dockerfile",
-      "context": ".."
+    "dockerfile": "Dockerfile",
+    "context": ".."
   },
   "containerEnv": {
-    "PYTHONASYNCIODEBUG": "1"
+    "PYTHONASYNCIODEBUG": "1",
+    // Home Assistant runs from config/ and loads custom_components/cslab from the
+    // repository root through PYTHONPATH (no copies or symlinks needed)
+    "PYTHONPATH": "${containerWorkspaceFolder}"
   },
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "postCreateCommand": "/workspaces/csLights-hass-integration/postcreate_init.sh",
-  "appPort": ["8123:8123", "5683:5683/udp", "51827:51827"],
+  "postCreateCommand": "${containerWorkspaceFolder}/postcreate_init.sh",
+  "forwardPorts": [8123],
+  "portsAttributes": {
+    "8123": { "label": "Home Assistant" }
+  },
+  // NET_ADMIN lets cshomemaster_block.sh use iptables to simulate a lost master
   "runArgs": ["-e", "GIT_EDITOR=code --wait", "--cap-add=NET_ADMIN"],
   "customizations": {
     "vscode": {
       "extensions": [
         "charliermarsh.ruff",
-        "ms-python.pylint",
+        "ms-python.python",
         "ms-python.vscode-pylance",
-        "visualstudioexptteam.vscodeintellicode",
         "redhat.vscode-yaml",
         "esbenp.prettier-vscode",
         "GitHub.vscode-pull-request-github",
@@ -28,16 +34,14 @@
       "settings": {
         "editor.formatOnSave": true,
         "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
-        "python.experiments.optOutFrom": ["pythonTestAdapter"],
-        "python.linting.banditEnabled": true,
-        "python.linting.enabled": true,
-        "python.linting.mypyEnabled": true,
-        "python.linting.pylintEnabled": true,
-        "python.pythonPath": "/home/vscode/.local/ha-venv/bin/python",
         "python.terminal.activateEnvInCurrentTerminal": true,
-        "terminal.integrated.shell.linux": "/bin/bash"
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        },
+        "terminal.integrated.defaultProfile.linux": "bash"
       }
     }
   }
 }
-

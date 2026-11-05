@@ -1,63 +1,37 @@
-# Use the official Python development container image
-FROM mcr.microsoft.com/vscode/devcontainers/python:3.12
+# Development container for the csLights Home Assistant integration.
+# Recent Home Assistant releases need Python 3.14.
+FROM mcr.microsoft.com/devcontainers/python:3.14
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Uninstall pre-installed formatting and linting tools
-# They would conflict with our pinned versions
-RUN \
-    pipx uninstall pydocstyle \
-    && pipx uninstall pycodestyle \
-    && pipx uninstall mypy \
-    && pipx uninstall pylint
-
-RUN \
-    curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - \
-    && apt-get update \
+# System packages:
+# - iptables: cshomemaster_block.sh / cshomemaster_unblock.sh (needs --cap-add=NET_ADMIN)
+# - ffmpeg, libturbojpeg0, libpcap0.8: used by integrations in Home Assistant's default_config
+RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    # Additional library needed by some tests and accordingly by VScode Tests Discovery
-    bluez \
-    ffmpeg \
-    libudev-dev \
-    libavformat-dev \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavutil-dev \
-    libgammu-dev \
-    libswscale-dev \
-    libswresample-dev \
-    libavfilter-dev \
-    libpcap-dev \
-    libturbojpeg0 \
-    libyaml-dev \
-    libxml2 \
-    git \
-    cmake \
-    iptables \
+        ffmpeg \
+        iptables \
+        libpcap0.8 \
+        libturbojpeg0 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN pip3 install uv
+# go2rtc is needed by default_config (camera streaming); use the version
+# recommended by Home Assistant (homeassistant/components/go2rtc/const.py)
+COPY --from=ghcr.io/alexxit/go2rtc:1.9.14 /usr/local/bin/go2rtc /usr/local/bin/go2rtc
 
-WORKDIR /usr/src
-
-# Setup hass-release
-RUN git clone --depth 1 https://github.com/home-assistant/hass-release \
-    && uv pip install --system -e hass-release/
+RUN pip3 install --no-cache-dir uv
 
 USER vscode
 ENV VIRTUAL_ENV="/home/vscode/.local/ha-venv"
-RUN uv venv $VIRTUAL_ENV
+RUN uv venv "$VIRTUAL_ENV" \
+    && echo 'source "$HOME/.local/ha-venv/bin/activate"' >> "$HOME/.bashrc"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-WORKDIR /tmp
-
-# Install Python dependencies from requirements
-COPY requirements_dev.txt ./
+# Home Assistant (version pinned by the test harness), test and lint tools
+WORKDIR /tmp/requirements
+COPY requirements_dev.txt requirements_test.txt ./
 RUN uv pip install -r requirements_dev.txt
 
 WORKDIR /workspaces
-
-# Set the default shell to bash instead of sh
-ENV SHELL /bin/bash
+ENV SHELL=/bin/bash

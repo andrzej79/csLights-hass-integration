@@ -9,7 +9,8 @@
             "type": "debugpy",
             "request": "launch",
             "module": "homeassistant",
-            "args": ["-c", "/workspaces/csLights-hass-integration"],
+            "args": ["-c", "${workspaceFolder}/config"],
+            "env": { "PYTHONPATH": "${workspaceFolder}" },
             "cwd": "${workspaceFolder}"
         }
     ]

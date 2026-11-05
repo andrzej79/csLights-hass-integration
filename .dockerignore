@@ -1,0 +1,5 @@
+# The image only needs the requirements files; keep the rest (especially the
+# development Home Assistant instance in config/) out of the build context.
+*
+!requirements_dev.txt
+!requirements_test.txt

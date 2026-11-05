@@ -1,24 +1,20 @@
 #!/bin/sh
+# Creates the development Home Assistant instance in config/ (git-ignored).
+# Runs once after the devcontainer is created; existing files are kept.
 
-if [ ! -f /workspaces/csLights-hass-integration/configuration.yaml ]; then 
-    cp /workspaces/csLights-hass-integration/configuration-defaults.yaml /workspaces/csLights-hass-integration/configuration.yaml; 
+cd "$(dirname "$0")" || exit 1
+mkdir -p config
+
+if [ ! -f config/configuration.yaml ]; then
+    cp configuration-defaults.yaml config/configuration.yaml
 fi
 
-if [ ! -f /workspaces/csLights-hass-integration/automations.yaml ]; then 
-    echo "[]" >/workspaces/csLights-hass-integration/automations.yaml
+if [ ! -f config/automations.yaml ]; then
+    echo "[]" > config/automations.yaml
 fi
 
-if [ ! -f /workspaces/csLights-hass-integration/scripts.yaml ]; then 
-    touch /workspaces/csLights-hass-integration/scripts.yaml
-fi
+for f in scripts.yaml scenes.yaml secrets.yaml; do
+    [ -f "config/$f" ] || touch "config/$f"
+done
 
-if [ ! -f /workspaces/csLights-hass-integration/scenes.yaml ]; then 
-    touch /workspaces/csLights-hass-integration/scenes.yaml
-fi
-
-if [ ! -f /workspaces/csLights-hass-integration/secrets.yaml ]; then 
-    touch /workspaces/csLights-hass-integration/secrets.yaml
-fi
-
-sed -i "s|#alias ll='ls -l'|alias ll='ls -l --group-directories-first'|" /home/vscode/.bashrc
-
+sed -i "s|#alias ll='ls -l'|alias ll='ls -l --group-directories-first'|" "$HOME/.bashrc"

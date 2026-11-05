@@ -105,7 +105,7 @@ python3.14 -m venv .venv
 .venv/bin/pytest
 ```
 
-For a full development environment with Home Assistant, open the repository in the included VS Code devcontainer.
+For a full development environment, open the repository in the included VS Code devcontainer. It runs a development Home Assistant instance from the git-ignored `config/` folder (start it with the **Python Debugger: Module** launch configuration or `python -m homeassistant -c config`) and loads the integration directly from `custom_components/cslab`.
 
 ## License
 

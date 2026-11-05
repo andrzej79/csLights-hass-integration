@@ -162,17 +162,6 @@ cython_debug/
 #.idea/
 
 .DS_Store
-/.storage
-/blueprints
-scenes.yaml
-scripts.yaml
-secrets.yaml
-home-assistant_v2.db
-home-assistant.log.1
-configuration.yaml
-automations.yaml
-.HA_VERSION
-*.db-shm
-*.db-wal
 
-home-assistant.log.fault
+# Development Home Assistant instance (created by postcreate_init.sh)
+/config/

@@ -17,15 +17,16 @@ The master controller software (csHomeMaster, a Qt daemon running on a Raspberry
 
 ## Development
 
-Development happens in the VS Code devcontainer (`.devcontainer/`, Python 3.12, venv at `/home/vscode/.local/ha-venv`). Scripts and launch configs hard-code the path `/workspaces/csLights-hass-integration`.
+Development happens in the VS Code devcontainer (`.devcontainer/`, Python 3.14, venv at `/home/vscode/.local/ha-venv`). Its Home Assistant version comes from `requirements_dev.txt` → `requirements_test.txt`, so the devcontainer, the tests and CI all use the version pinned by `pytest-homeassistant-custom-component`.
 
 ```sh
 # Run Home Assistant with the integration loaded (UI on port 8123).
 # Also available as the "Python Debugger: Module" launch config.
-python -m homeassistant -c /workspaces/csLights-hass-integration
+python -m homeassistant -c config
 
-# Static checks (no project config, so tool defaults apply; ruff is also available through the VS Code extension)
-flake8 custom_components/cslab
+# Static checks (no project config, so tool defaults apply). mypy reports the voluptuous
+# data_schema arguments, see "Home Assistant compatibility" below.
+ruff check custom_components/cslab
 mypy custom_components/cslab
 
 # Simulate losing the master connection, to test reconnect behaviour (uses iptables, devcontainer only)
@@ -33,16 +34,18 @@ mypy custom_components/cslab
 ./cshomemaster_unblock.sh
 ```
 
-- Tests (`tests/`) run the integration inside real Home Assistant (via `pytest-homeassistant-custom-component`) against `FakeDaemon` in `tests/conftest.py`, which mimics the master's protocol. Recent Home Assistant versions need Python 3.14, so use a separate venv rather than the devcontainer's Python 3.12. Keep `FakeDaemon` in line with the real daemon when the protocol changes, and still check bigger changes against a real master.
+- Tests (`tests/`) run the integration inside real Home Assistant (via `pytest-homeassistant-custom-component`) against `FakeDaemon` in `tests/conftest.py`, which mimics the master's protocol. They run in the devcontainer (`pytest`); outside it, recent Home Assistant versions need a Python 3.14 venv. Keep `FakeDaemon` in line with the real daemon when the protocol changes, and still check bigger changes against a real master.
 
 ```sh
-python3.14 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
-.venv/bin/pytest                                   # all tests
-.venv/bin/pytest tests/test_cslab.py::test_config_flow   # one test
+pytest                                    # all tests (devcontainer)
+pytest tests/test_cslab.py::test_config_flow   # one test
+
+# outside the devcontainer
+python3.14 -m venv .venv && .venv/bin/pip install -r requirements_test.txt && .venv/bin/pytest
 ```
 - CI (`.github/workflows/`) runs the tests, hassfest and HACS validation on every push, so `manifest.json`, `hacs.json` and the translation files must pass those validators. GitHub disables scheduled workflows after 60 days without repository activity; re-enable them with `gh workflow enable`.
-- The repo root doubles as the Home Assistant config directory. `configuration.yaml`, `.storage/`, `home-assistant_v2.db`, logs and similar are git-ignored runtime state. `postcreate_init.sh` creates `configuration.yaml` from `configuration-defaults.yaml`, so make default config changes in the latter.
-- Debug logging is controlled by the `custom_components.cslab` logger in `configuration.yaml`.
+- The development Home Assistant instance lives in `config/` (git-ignored, also excluded from the Docker build by `.dockerignore`). `postcreate_init.sh` creates `config/configuration.yaml` from `configuration-defaults.yaml`, so make default config changes in the latter. Home Assistant loads the integration straight from `custom_components/cslab` in the repository root because `PYTHONPATH` points there (set in `devcontainer.json` and `launch.json`); don't copy or symlink it into `config/`.
+- Debug logging is controlled by the `custom_components.cslab` logger in `config/configuration.yaml`.
 
 ## Architecture
 
