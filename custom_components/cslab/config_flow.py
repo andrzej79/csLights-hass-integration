@@ -14,7 +14,6 @@ from homeassistant.config_entries import (
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
-    OptionsFlowWithConfigEntry
 )
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
@@ -92,16 +91,16 @@ class CSConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> OptionsFlow:
         """Get the options flow for this handler."""
-        return CSOptionsFlowHandler(config_entry)
+        return CSOptionsFlowHandler()
 
 
 # Options Flow Handler
-class CSOptionsFlowHandler(OptionsFlowWithConfigEntry):
-    """Handle csLights options."""
+class CSOptionsFlowHandler(OptionsFlow):
+    """Handle csLights options.
 
-    # def __init__(self, config_entry: ConfigEntry) -> None:
-    #     """Initialize options flow."""
-    #     super().__init__(config_entry)
+    Home Assistant (2024.12+) provides self.config_entry; OptionsFlowWithConfigEntry
+    is being phased out.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -118,6 +117,9 @@ class CSOptionsFlowHandler(OptionsFlowWithConfigEntry):
                 errors["base"] = "cannot_connect"
             except InvalidHost:
                 errors["base"] = "invalid_host"
+            except Exception:
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
             else:
                 return self.async_create_entry(title="", data={"master_host": host})
 

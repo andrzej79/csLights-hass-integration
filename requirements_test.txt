@@ -1,0 +1,3 @@
+# Test dependencies. pytest-homeassistant-custom-component pins a matching
+# homeassistant version (recent versions need Python 3.14).
+pytest-homeassistant-custom-component

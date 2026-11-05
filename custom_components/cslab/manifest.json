@@ -4,13 +4,14 @@
   "codeowners": ["@andrzej79"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://www.home-assistant.io/integrations/cslab",
+  "documentation": "https://github.com/andrzej79/csLights-hass-integration",
   "homekit": {},
   "iot_class": "local_push",
+  "issue_tracker": "https://github.com/andrzej79/csLights-hass-integration/issues",
   "loggers": ["cslights"],
   "requirements": [],
   "single_config_entry": true,
   "ssdp": [],
-  "version": "1.0.8",
+  "version": "1.0.9",
   "zeroconf": []
 }

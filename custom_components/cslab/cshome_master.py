@@ -60,6 +60,12 @@ class CSHomeMaster:
         # signature of the home model loaded at setup, compared after reconnect
         self._home_model_sig: list[str] | None = None
         self._model_check_pending = False
+        # True while an outage has been reported, so retries log only at debug level
+        self._outage_logged = False
+        # set when async_setup completed; before that, failures are reported by HA
+        # through ConfigEntryNotReady (setup_error), so they are not logged here
+        self._setup_done = False
+        self.setup_error = ""
         self._tcpReader: asyncio.StreamReader | None = None
         self._tcpWriter: asyncio.StreamWriter | None = None
         _log.debug("CSHomeMaster initialized host: %s port: %d", self.host, self.port)
@@ -95,25 +101,27 @@ class CSHomeMaster:
         )
         _log.debug("CSHomeMaster async task created")
 
-        # wait for connection to be ready
+        # Failures are not logged here: async_setup_entry raises ConfigEntryNotReady
+        # with setup_error, and Home Assistant logs it and retries.
         try:
             await asyncio.wait_for(self._tcpConnectionReady.wait(), timeout=5)
         except TimeoutError:
-            _log.error("TCP connection with host: %s failed!", self.host)
+            self.setup_error = f"cannot connect to {self.host}:{self.port}"
             return False
         # request home model and module list, both methods wait for the reply
         # (5 s each) and return False on timeout
         try:
             if not await asyncio.wait_for(self.readHomeModel(), timeout=10):
-                _log.error("Home model receive timeout!")
+                self.setup_error = "no home model received from the master"
                 return False
             if not await asyncio.wait_for(self.getModuleList(), timeout=10):
-                _log.error("Module list receive timeout!")
+                self.setup_error = "no module list received from the master"
                 return False
         except (TimeoutError, OSError) as e:
-            _log.error("CSHomeMaster setup failed: %s", e)
+            self.setup_error = f"communication with the master failed: {e}"
             return False
         # connection ready, home model received
+        self._setup_done = True
         _log.debug("CSHomeMaster setup completed")
         return True
 
@@ -134,7 +142,7 @@ class CSHomeMaster:
                 except Exception:
                     # keep the receiver alive whatever goes wrong
                     _log.exception("Unexpected error in csLights receiver")
-                    await self.handleConnectionError()
+                    await self.handleConnectionError("receiver error")
 
         except asyncio.CancelledError:
             _log.debug("receiver async_task cancelled")
@@ -148,32 +156,46 @@ class CSHomeMaster:
         try:
             rplData = await asyncio.wait_for(self._tcpReader.readline(), timeout=60)
         except TimeoutError:
-            _log.error("TCP read timeout")
-            await self.handleConnectionError()
+            await self.handleConnectionError("no data received for 60 s")
             return
         except (OSError, ValueError) as e:
             # connection reset/aborted, or line longer than the reader limit
-            _log.error("TCP read error: %s", e)
-            await self.handleConnectionError()
+            await self.handleConnectionError(f"read error: {e}")
             return
         _log.debug("csLights Received data size: %d", len(rplData))
         if len(rplData) == 0:
-            await self.handleConnectionError()
+            await self.handleConnectionError("connection closed by master")
             return
         await self.parseIncomingData(rplData)
 
-    async def handleConnectionError(self) -> None:
-        """Handle connection error."""
+    async def handleConnectionError(self, reason: str | None = None) -> None:
+        """Handle a broken connection: mark offline, wait 5 s and reconnect.
+
+        Logs one warning per outage and one when it ends; the retries in
+        between are only logged at debug level.
+        """
         self._master_online = False
         if self._tcpWriter is not None:
             self._tcpWriter.close()
         if self._tcpReader is not None:
             self._tcpReader.feed_eof()
         await self.devs_publish_update()
-        _log.error("Connection error, reconnecting...")
+        if not self._setup_done:
+            _log.debug("Connecting to csLights master %s failed (%s)", self.host, reason)
+        elif not self._outage_logged:
+            _log.warning(
+                "Connection to csLights master %s lost (%s), reconnecting every 5 s",
+                self.host,
+                reason or "not connected",
+            )
+            self._outage_logged = True
+        else:
+            _log.debug("Reconnecting to csLights master %s", self.host)
         await asyncio.sleep(5)
         if await self.initConnection() is True:
-            _log.info("Connection restored, checking home model")
+            if self._outage_logged:
+                _log.warning("Connection to csLights master %s restored", self.host)
+            self._outage_logged = False
             # The master may have restarted with a changed home database. Verify
             # the home model before requesting states: requesting a removed
             # accessory id used to crash the master. Accessory states are
@@ -182,12 +204,8 @@ class CSHomeMaster:
 
     async def requestHomeModelCheck(self) -> bool:
         """Request the home model to compare it with the one loaded at setup."""
-        if self._tcpWriter is None:
-            _log.error("TCP writer is None")
-            return False
         self._model_check_pending = True
-        self._tcpWriter.write(json.dumps({"command": "GetHomeModel"}).encode())
-        return True
+        return self._send({"command": "GetHomeModel"})
 
     async def initConnection(self) -> bool:
         """Initialize connection."""
@@ -197,11 +215,9 @@ class CSHomeMaster:
                 timeout=5,
             )
             self._tcpReader, self._tcpWriter = connection
-        except ConnectionRefusedError:
-            _log.error("Connection refused")
-            return False
-        except OSError as e:
-            _log.error("Failed to connect to %s: %s", self.host, e)
+        except OSError as e:  # includes refused connections and timeouts
+            # reported once per outage by handleConnectionError / async_setup
+            _log.debug("Failed to connect to %s: %s", self.host, e)
             return False
         self._master_online = True
         self._tcpConnectionReady.set()
@@ -225,7 +241,7 @@ class CSHomeMaster:
             "module-list": self.handleIncomingModuleList,
             "lbus-status": self.handleIncomingLBusStatus,
         }
-        handler = handlers.get(rpl_type)
+        handler = handlers.get(rpl_type) if isinstance(rpl_type, str) else None
         if handler is None:
             if rpl_type in IGNORED_RPL_TYPES:
                 _log.debug("Ignoring '%s' reply", rpl_type)
@@ -418,95 +434,64 @@ class CSHomeMaster:
                 await ctrlModDev.trigger_publish_updates()
                 return
 
+    def _send(self, data: dict) -> bool:
+        """Send a command to the master; drop it (with a debug log) if offline."""
+        if not self._master_online or self._tcpWriter is None:
+            _log.debug("Master offline, command not sent: %s", data)
+            return False
+        self._tcpWriter.write(json.dumps(data).encode())
+        return True
+
+    def _send_acc_value(self, accId: int, evt_type: str, value: float | bool) -> bool:
+        """Send an AccSetValue command."""
+        return self._send(
+            {
+                "command": "AccSetValue",
+                "acc-id": str(accId),
+                "evt-type": evt_type,
+                "evt-value": value,
+            }
+        )
+
     async def setAccBrightnessValue(self, accId: int, value: float) -> bool:
         """Set Accessory Brightness value."""
-        data = {
-            "command": "AccSetValue",
-            "acc-id": str(accId),
-            "evt-type": "set-brightness",
-            "evt-value": value,
-        }
-        data_str = json.dumps(data)
-        if self._tcpWriter is None:
-            _log.error("TCP writer is None")
-            return False
-        self._tcpWriter.write(data_str.encode())
-        return True
+        return self._send_acc_value(accId, "set-brightness", value)
 
     async def setAccBoolValue(self, accId: int, value: bool) -> bool:
         """Set Accessory Boolean value."""
-        data = {
-            "command": "AccSetValue",
-            "acc-id": str(accId),
-            "evt-type": "set-bool",
-            "evt-value": value,
-        }
-        data_str = json.dumps(data)
-        if self._tcpWriter is None:
-            _log.error("TCP writer is None")
-            return False
-        self._tcpWriter.write(data_str.encode())
-        return True
+        return self._send_acc_value(accId, "set-bool", value)
 
     async def setAccPositionValue(self, accId: int, value: float) -> bool:
         """Set Accessory Position value."""
-        data = {
-            "command": "AccSetValue",
-            "acc-id": str(accId),
-            "evt-type": "set-position",
-            "evt-value": value,
-        }
-        data_str = json.dumps(data)
-        if self._tcpWriter is None:
-            _log.error("TCP writer is None")
-            return False
-        self._tcpWriter.write(data_str.encode())
-        return True
+        return self._send_acc_value(accId, "set-position", value)
 
     async def updateAccessoryReq(self, accId: int) -> bool:
         """Request accessory update."""
-        data = {
-            "command": "GetAccState",
-            "acc-id": str(accId),
-        }
-        data_str = json.dumps(data)
-        if self._tcpWriter is None:
-            _log.error("TCP writer is None")
-            return False
-        self._tcpWriter.write(data_str.encode())
-        return True
+        return self._send({"command": "GetAccState", "acc-id": str(accId)})
 
     async def readHomeModel(self) -> bool:
         """Read data from the tcp connection (test)."""
-        data = {"command": "GetHomeModel"}
-        data_str = json.dumps(data)
-        if self._tcpWriter is None:
-            _log.error("TCP writer is None")
+        if not self._send({"command": "GetHomeModel"}) or self._tcpWriter is None:
             return False
-        self._tcpWriter.write(data_str.encode())
         await self._tcpWriter.drain()
         # wait for home model to be ready
         try:
             await asyncio.wait_for(self._homeModelReady.wait(), timeout=5)
         except TimeoutError:
-            _log.error("Home model not receive timeout")
+            _log.debug("Home model receive timeout")
             return False
         return True
 
     async def getModuleList(self) -> bool:
         """Get module list."""
-        data = {"command": "GetModules"}
-        data_str = json.dumps(data)
-        if self._tcpWriter is None:
-            _log.error("TCP writer is None")
+        if not self._send({"command": "GetModules"}) or self._tcpWriter is None:
             return False
-        self._tcpWriter.write(data_str.encode())
         await self._tcpWriter.drain()
         # wait for module list to be ready
         try:
             await asyncio.wait_for(self._moduleListReady.wait(), timeout=5)
         except TimeoutError:
-            _log.error("Module list not receive timeout")
+            _log.debug("Module list receive timeout")
             return False
         return True
 

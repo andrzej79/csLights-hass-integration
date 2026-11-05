@@ -33,7 +33,13 @@ mypy custom_components/cslab
 ./cshomemaster_unblock.sh
 ```
 
-- There are no automated tests. Changes are verified by running Home Assistant against a real master controller.
+- Tests (`tests/`) run the integration inside real Home Assistant (via `pytest-homeassistant-custom-component`) against `FakeDaemon` in `tests/conftest.py`, which mimics the master's protocol. Recent Home Assistant versions need Python 3.14, so use a separate venv rather than the devcontainer's Python 3.12. Keep `FakeDaemon` in line with the real daemon when the protocol changes, and still check bigger changes against a real master.
+
+```sh
+python3.14 -m venv .venv && .venv/bin/pip install -r requirements_test.txt
+.venv/bin/pytest                                   # all tests
+.venv/bin/pytest tests/test_cslab.py::test_config_flow   # one test
+```
 - CI only runs hassfest and HACS validation (`.github/workflows/`), so `manifest.json`, `hacs.json` and the translation files must pass those validators.
 - The repo root doubles as the Home Assistant config directory. `configuration.yaml`, `.storage/`, `home-assistant_v2.db`, logs and similar are git-ignored runtime state. `postcreate_init.sh` creates `configuration.yaml` from `configuration-defaults.yaml`, so make default config changes in the latter.
 - Debug logging is controlled by the `custom_components.cslab` logger in `configuration.yaml`.
@@ -71,6 +77,12 @@ Entities use `should_poll = False` and are push-driven. A command only writes to
 - `handleConnectionError` retries every 5 seconds. After reconnecting it requests the home model before any accessory states. If the model differs from the one loaded at setup (compared with `_home_model_signature`), it schedules a reload instead of requesting states. Sending `GetAccState` for an accessory the master no longer has crashed older daemons.
 - Home model and module list replies are only applied once, at setup. Later home models are only compared with the loaded one.
 - Changing the host in the options flow tests the connection, updates `entry.data` and reloads the entry.
+- Logging: a failed setup is not logged by the integration itself; `ConfigEntryNotReady` carries `setup_error` and Home Assistant logs it. After setup, an outage logs one warning when it starts and one when the connection is restored; the retries in between are debug only. Commands sent while the master is offline are dropped with a debug log.
+
+### Home Assistant compatibility
+
+- The minimum Home Assistant version is set in `hacs.json` (currently 2024.12.0, the first version where a plain `OptionsFlow` gets `self.config_entry` from Home Assistant). Raise it when using a newer API.
+- Since 2026.9, Home Assistant validates with `probatio` and aliases `import voluptuous` to it for custom integrations, so `voluptuous` imports keep working. Importing `probatio` directly would break versions before 2026.9. mypy against current Home Assistant reports the `data_schema` arguments for this reason; that is expected.
 
 ### Data model and entity mapping (`cshome_helpers.py`)
 

@@ -64,7 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: CSNameConfigEntry) -> bo
         hass.data[DOMAIN].pop(entry.entry_id, None)
         # Home Assistant retries the setup later
         raise ConfigEntryNotReady(
-            f"Cannot connect to csLights master at {entry.data.get(CONF_HOST)}"
+            f"csLights master {entry.data.get(CONF_HOST)}: {csmaster.setup_error}"
         )
 
     # Forward the setup to the platform(s)
