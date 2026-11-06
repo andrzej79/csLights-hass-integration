@@ -70,7 +70,7 @@ CSHomeMaster: owns the TCP connection and the receive task, stored in hass.data[
 
 ### State flow
 
-Entities use `should_poll = False` and are push-driven. A command only writes to the socket, and entity state changes when the master replies with `acc-state`, which updates the device object and fires its callbacks. Entity `async_update` likewise just sends `GetAccState` and does not wait for the answer.
+Entities use `should_poll = False` and are push-driven. A command only writes to the socket, and entity state changes when the master replies with `acc-state`, which updates the device object and fires its callbacks. Each `acc-state` message is applied as a whole by the device's `apply_state()` and published once: a half-applied state (for example a blind's new position with its old movement state) would be forwarded as is by the HomeKit bridge. Entity `async_update` likewise just sends `GetAccState` and does not wait for the answer.
 
 ### Startup and reconnect
 

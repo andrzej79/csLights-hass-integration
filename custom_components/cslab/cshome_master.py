@@ -265,43 +265,26 @@ class CSHomeMaster:
         currPos = jrpl.get("currPos")
         state = jrpl.get("state")
         value = jrpl.get("value")
+        # Each message is applied as a whole and published once, so Home Assistant
+        # never sees a half-updated state (e.g. the new position with the old
+        # movement state), which the HomeKit bridge would forward as is.
         for light in self._lights:
             if light.get_home_item().accessory.id == acc_id:
-                await light.set_online(True)
-                if brightness is not None and isOn is not None:
-                    await light.set_current_brightness_and_state(brightness, isOn)
-                    return
-                if brightness is not None:
-                    await light.set_current_brightness(brightness)
-                if isOn is not None:
-                    await light.set_current_state(isOn)
-                # accessory found, no need to continue
+                await light.apply_state(brightness=brightness, on=isOn)
                 return
         for blind in self._blinds:
             if blind.get_home_item().accessory.id == acc_id:
-                await blind.set_online(True)
-                if currPos is not None:
-                    _log.debug("acc[%d] currPos: %.2f", acc_id, currPos)
-                    await blind.set_current_position(currPos)
-                if state is not None:
-                    _log.debug("acc[%d] state: %s", acc_id, state)
-                    await blind.set_current_state(state)
-                # accessory found, no need to continue
+                _log.debug("acc[%d] currPos: %s state: %s", acc_id, currPos, state)
+                await blind.apply_state(position=currPos, state=state)
                 return
         for relay in self._relays:
             if relay.get_home_item().accessory.id == acc_id:
-                await relay.set_online(True)
-                if state is not None:
-                    await relay.set_current_state(state)
-                # accessory found, no need to continue
+                await relay.apply_state(state=state)
                 return
         for switch in self._switches:
             if switch.get_home_item().accessory.id == acc_id:
-                await switch.set_online(True)
-                if value is not None:
-                    _log.debug("update of wall switch %d to %s", acc_id, value)
-                    await switch.set_current_state(value)
-                # accessory found, no need to continue
+                _log.debug("update of wall switch %d to %s", acc_id, value)
+                await switch.apply_state(value=value)
                 return
         _log.debug("Received state update of unknown device, acc_id: %d", acc_id)
 
@@ -585,13 +568,6 @@ class CSBaseDev:
         """Return online state."""
         return self._online
 
-    async def set_online(self, online: bool) -> None:
-        """Set online state."""
-        if self._online == online:
-            return
-        self._online = online
-        await self.publish_updates()
-
     async def publish_updates(self) -> None:
         """Publish updates to all registered callbacks."""
         for callback in self._callbacks:
@@ -618,26 +594,19 @@ class CSLightDev(CSBaseDev):
         """Return state of the light."""
         return self._current_state
 
-    async def set_current_state(self, state: bool) -> None:
-        """Set current state of the light."""
-        self._current_state = state
-        await self.publish_updates()
-
     def get_current_brightness(self) -> float:
         """Return brightness of the light."""
         return self._current_brightness
 
-    async def set_current_brightness(self, brightness: float) -> None:
-        """Set current brightness of the light."""
-        self._current_brightness = brightness
-        await self.publish_updates()
-
-    async def set_current_brightness_and_state(
-        self, brightness: float, state: bool
+    async def apply_state(
+        self, brightness: float | None = None, on: bool | None = None
     ) -> None:
-        """Set current brightness and state of the light."""
-        self._current_brightness = brightness
-        self._current_state = state
+        """Apply a state message from the master and publish it once."""
+        self._online = True
+        if brightness is not None:
+            self._current_brightness = brightness
+        if on is not None:
+            self._current_state = on
         await self.publish_updates()
 
     async def set_target_state(self, state: bool) -> None:
@@ -684,19 +653,20 @@ class CSBlindDev(CSBaseDev):
         """Return state of the blind."""
         return self._current_state
 
-    async def set_current_state(self, state: str) -> None:
-        """Set current state of the blind."""
-        self._current_state = state
+    async def apply_state(
+        self, position: float | None = None, state: str | None = None
+    ) -> None:
+        """Apply a state message from the master and publish it once."""
+        self._online = True
+        if position is not None:
+            self._current_position = position
+        if state is not None:
+            self._current_state = state
         await self.publish_updates()
 
     def get_current_position(self) -> float:
         """Return current position of the blind."""
         return self._current_position
-
-    async def set_current_position(self, pos: float) -> None:
-        """Set current position of the blind."""
-        self._current_position = pos
-        await self.publish_updates()
 
     async def set_target_position(self, pos: float | None) -> None:
         """Set target position of the blind."""
@@ -718,14 +688,16 @@ class CSRelayDev(CSBaseDev):
         self._current_state: bool | None = None
         self._target_state: bool = False
 
+    async def apply_state(self, state: bool | None = None) -> None:
+        """Apply a state message from the master and publish it once."""
+        self._online = True
+        if state is not None:
+            self._current_state = state
+        await self.publish_updates()
+
     def get_current_state(self) -> bool | None:
         """Return state of the relay."""
         return self._current_state
-
-    async def set_current_state(self, state: bool) -> None:
-        """Set current state of the relay."""
-        self._current_state = state
-        await self.publish_updates()
 
     async def set_target_state(self, state: bool) -> None:
         """Set state of the relay."""
@@ -744,14 +716,16 @@ class CSWallSwitchDev(CSBaseDev):
         super().__init__(csmaster, item)
         self._current_state: bool | None = None
 
+    async def apply_state(self, value: str | None = None) -> None:
+        """Apply a state message from the master and publish it once."""
+        self._online = True
+        if value is not None:
+            self._current_state = value
+        await self.publish_updates()
+
     def get_current_state(self) -> bool | None:
         """Return state of the switch."""
         return self._current_state
-
-    async def set_current_state(self, state: bool) -> None:
-        """Set current state of the switch."""
-        self._current_state = state
-        await self.publish_updates()
 
 
 ###################################################

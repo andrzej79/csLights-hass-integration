@@ -1,13 +1,12 @@
 """csLights integration in real Home Assistant against the fake daemon."""
 
 import asyncio
-import json
 
 from unittest.mock import patch
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, EVENT_STATE_CHANGED
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -334,4 +333,39 @@ async def test_flow_unexpected_errors(hass, daemon):
     assert same["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED and entry.data[CONF_HOST] == "127.0.0.1"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_state_message_is_one_state_change(hass, daemon):
+    """A message from the master is applied as a whole and published once.
+
+    A half-applied state (new position with the old movement state) would be
+    forwarded as is by e.g. the HomeKit bridge.
+    """
+    entry = await setup_entry(hass)
+    ids = entity_ids(hass, entry)
+    blind, lamp = ids["WindowBlind.002"], ids["Light.001"]
+    assert await wait_until(hass, lambda: hass.states.get(blind).attributes.get("current_position") == 29)
+    assert await wait_until(hass, lambda: hass.states.get(lamp).state == "on")
+
+    changes = []
+    hass.bus.async_listen(
+        EVENT_STATE_CHANGED,
+        lambda event: changes.append(event.data["new_state"])
+        if event.data["entity_id"] in (blind, lamp) else None,
+    )
+
+    daemon.send({"rpl-type": "acc-state", "acc-id": 2, "valid": True, "type": "blind",
+                 "currPos": 0.3, "cmdPos": 1.0, "state": "BlindUp"})
+    daemon.send({"rpl-type": "acc-state", "acc-id": 1, "valid": True, "type": "light",
+                 "on": False, "brightness": 0.0})
+    assert await wait_until(hass, lambda: len(changes) >= 2)
+    await asyncio.sleep(0.2)
+    await hass.async_block_till_done()
+
+    assert len(changes) == 2, [(s.entity_id, s.state, dict(s.attributes)) for s in changes]
+    blind_state, lamp_state = changes
+    assert blind_state.state == "opening" and blind_state.attributes["current_position"] == 30
+    assert lamp_state.state == "off"
+
     assert await hass.config_entries.async_unload(entry.entry_id)
